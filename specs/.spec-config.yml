@@ -1,0 +1,2 @@
+# Controla la creación automática de ramas con /spec-impl.
+AutoCreateBranch: true
