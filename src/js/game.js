@@ -27,6 +27,7 @@ function createGame() {
     state: 'start',
     score: 0,
     lives: 3,
+    releaseElapsed: 0,
     dotsRemaining: dots,
     grid,
     pacman: {
@@ -42,6 +43,7 @@ function createGame() {
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      releaseDelay: g.releaseDelay,
     } ) ),
   };
 }
@@ -110,9 +112,68 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+function findGhostDirection( grid, ghost, target, choices = Object.keys( DIRS ) ) {
+  const width = grid[ 0 ].length;
+  const queue = [ { x: ghost.x, y: ghost.y, direction: null } ];
+  const visited = new Set( [ ghost.y * width + ghost.x ] );
+  let bestDirection = choices.find( ( direction ) => canMove( grid, ghost.x, ghost.y, direction, 'ghost' ) ) || ghost.dir;
+  let bestDistance = Infinity;
+
+  for ( let index = 0; index < queue.length; index++ ) {
+    const cell = queue[ index ];
+    const distance = Math.abs( cell.x - target.x ) + Math.abs( cell.y - target.y );
+    // BFS conserva la ruta más corta también al elegir un objetivo alternativo.
+    if ( distance < bestDistance ) {
+      bestDistance = distance;
+      bestDirection = cell.direction || bestDirection;
+    }
+    if ( distance === 0 ) break;
+
+    const directions = index === 0 ? choices : Object.keys( DIRS );
+    for ( const direction of directions ) {
+      if ( !canMove( grid, cell.x, cell.y, direction, 'ghost' ) ) continue;
+      const step = DIRS[ direction ];
+      const x = ( cell.x + step.x + width ) % width;
+      const y = cell.y + step.y;
+      const key = y * width + x;
+      if ( visited.has( key ) ) continue;
+      visited.add( key );
+      queue.push( { x, y, direction: cell.direction || direction } );
+    }
+  }
+
+  return bestDirection;
+}
+
+function getGhostTarget( game, ghost ) {
+  const pacman = game.pacman;
+  const position = { x: Math.round( pacman.x ), y: Math.round( pacman.y ) };
+  const direction = DIRS[ pacman.dir ];
+
+  if ( ghost.kind === 'ambusher' ) {
+    return { x: position.x + direction.x * 4, y: position.y + direction.y * 4 };
+  }
+  if ( ghost.kind === 'coordinated' ) {
+    const chaser = game.ghosts.find( ( candidate ) => candidate.kind === 'chaser' );
+    const pivot = { x: position.x + direction.x * 2, y: position.y + direction.y * 2 };
+    return { x: pivot.x * 2 - Math.round( chaser.x ), y: pivot.y * 2 - Math.round( chaser.y ) };
+  }
+  if ( ghost.kind === 'shy' ) {
+    const distance = Math.abs( ghost.x - position.x ) + Math.abs( ghost.y - position.y );
+    if ( distance < 8 ) return { x: 1, y: game.grid.length - 2 };
+  }
+
+  return position;
+}
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
+  const target = getGhostTarget( game, g );
+
+  if ( g.kind === 'chaser' ) {
+    g.dir = findGhostDirection( grid, g, target );
+    return;
+  }
 
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
@@ -120,28 +181,12 @@ function decideGhost( game, g ) {
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
-    }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
-  }
+  g.dir = findGhostDirection( grid, g, target, choices );
 }
 
 function moveGhost( game, g ) {
+  if ( game.releaseElapsed < g.releaseDelay ) return;
+
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
@@ -159,6 +204,7 @@ function moveGhost( game, g ) {
 }
 
 function resetPositions( game ) {
+  game.releaseElapsed = 0;
   const p = game.pacman;
   p.x = PACMAN_START.x;
   p.y = PACMAN_START.y;
@@ -175,12 +221,13 @@ function collides( a, b ) {
   return Math.abs( a.x - b.x ) < 0.5 && Math.abs( a.y - b.y ) < 0.5;
 }
 
-function update( game ) {
+function update( game, deltaSeconds = 0 ) {
+  game.releaseElapsed += deltaSeconds;
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
+    if ( game.releaseElapsed >= g.releaseDelay && collides( game.pacman, g ) ) {
       game.lives--;
       if ( game.lives <= 0 ) {
         game.state = 'lost';
