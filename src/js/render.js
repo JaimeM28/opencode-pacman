@@ -70,10 +70,11 @@ function drawDots( ctx, grid ) {
   ctx.fillStyle = DOT_COLOR;
   for ( let y = 0; y < grid.length; y++ ) {
     for ( let x = 0; x < grid[ 0 ].length; x++ ) {
-      if ( grid[ y ][ x ] !== 2 ) continue;
+      const tile = grid[ y ][ x ];
+      if ( tile !== 2 && tile !== 4 ) continue;
       const { cx, cy } = cellCenter( x, y );
       ctx.beginPath();
-      ctx.arc( cx, cy, 2.5, 0, Math.PI * 2 );
+      ctx.arc( cx, cy, tile === 4 ? 6 : 2.5, 0, Math.PI * 2 );
       ctx.fill();
     }
   }
@@ -99,9 +100,13 @@ function drawPacman( ctx, p, frame ) {
 }
 
 function drawGhost( ctx, g, color ) {
+  if ( g.mode === 'returning' ) {
+    drawGhostEyes( ctx, g );
+    return;
+  }
+
   const { cx, cy } = cellCenter( g.x, g.y );
   const r = TILE / 2 - 1;
-  const top = cy - r;
   const bottom = cy + r;
   const left = cx - r;
   const right = cx + r;
@@ -118,7 +123,11 @@ function drawGhost( ctx, g, color ) {
   ctx.closePath();
   ctx.fill();
 
-  // ojos mirando segun direccion
+  drawGhostEyes( ctx, g );
+}
+
+function drawGhostEyes( ctx, g ) {
+  const { cx, cy } = cellCenter( g.x, g.y );
   const dir = DIRS[ g.dir ] || { x: 0, y: 0 };
   const ex = dir.x * 1.6;
   const ey = dir.y * 1.6;
@@ -151,6 +160,14 @@ const GHOST_COLORS = {
   shy: '#ffb852',
 };
 
+function getGhostColor( game, ghost ) {
+  if ( isGhostVulnerable( game, ghost ) ) {
+    const flashing = game.powerRemaining <= 2 && Math.floor( game.powerRemaining * 4 ) % 2 === 0;
+    return flashing ? '#fff' : '#2121ff';
+  }
+  return GHOST_COLORS[ ghost.kind ] || '#ff0000';
+}
+
 function draw( ctx, game, frame ) {
   const grid = game.grid;
   const W = grid[ 0 ].length;
@@ -163,7 +180,7 @@ function draw( ctx, game, frame ) {
   drawDoor( ctx, grid );
   drawDots( ctx, grid );
   drawPacman( ctx, game.pacman, frame );
-  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, GHOST_COLORS[ g.kind ] || '#ff0000' ) );
+  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, getGhostColor( game, g ) ) );
   drawHUD( ctx, game, W );
 }
 
